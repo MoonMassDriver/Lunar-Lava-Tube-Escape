@@ -1,0 +1,570 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Lunar Lava Tube Escape</title>
+  <style>
+    body {
+      background-image: url('https://img.freepik.com/free-photo/black-limestone-rock-texture_1194-6294.jpg');
+      background-size: cover;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-start;
+      height: 100vh;
+      margin: 0;
+      padding-top: 10px;
+      font-family: Arial, sans-serif;
+      color: white;
+      text-shadow: 1px 1px 2px black;
+    }
+    canvas {
+      border: 1px solid silver;
+      background: transparent;
+      touch-action: none;
+      display: block;
+      max-width: 100%;
+      height: auto;
+    }
+    #controls {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      width: 360px;
+      max-width: 100%;
+      margin: 8px 0 12px;
+      padding: 0 10px;
+    }
+    #title {
+      font-size: 22px;
+      margin: 0;
+    }
+    #reset {
+      padding: 8px 16px;
+      font-size: 14px;
+      background: rgba(0,0,0,0.6);
+      color: white;
+      border: 1px solid silver;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+    #reset:hover {
+      background: rgba(255,255,255,0.2);
+    }
+  </style>
+</head>
+<body>
+  <div id="controls">
+    <h2 id="title">Lunar Lava Tube Escape</h2>
+    <button id="reset">New Tube</button>
+  </div>
+  <canvas id="canvas" width="360" height="550"></canvas>
+
+  <audio id="bgm" loop>
+    <source src="https://cdn.pixabay.com/audio/2023/08/07/audio_6e6d7d7e8d.mp3" type="audio/mpeg">
+    Your browser does not support the audio element.
+  </audio>
+
+  <script>
+    var canvas = document.getElementById('canvas');
+    var ctx = canvas.getContext('2d');
+    var WIDTH = canvas.width;
+    var HEIGHT = canvas.height;
+    const CELL = 20;
+    const COLS = WIDTH / CELL;
+    const ROWS = 25;
+    var maze = [];
+    var startCol = Math.floor(COLS / 2);
+    var startRow = ROWS - 1;
+    var startX = (startCol + 0.5) * CELL;
+    var startY = (startRow - 0.5) * CELL;
+    var exitCol = Math.floor(COLS / 2);
+    var exitX = (exitCol + 0.5) * CELL;
+    var explorer = { x: startX, y: startY, radius: 8, vx: 0, vy: 0 };
+    var gravity = 0.3;
+    var friction = 0.94;
+    var bounce = 0.55;
+    var tiltX = 0;
+    var climbSpeed = 2.2;
+    var startTime = Date.now();
+    var climbPhase = 0; 
+    var winAnimation = false;
+    var gameWon = false; // New state to stop logic after win
+    var winTimer = 0;
+    var particles = [];
+
+    var joystick = {
+      centerX: 55,
+      centerY: HEIGHT - 40,
+      baseR: 42,
+      knobR: 22,
+      maxDist: 22,
+      active: false,
+      knobX: 0,
+      knobY: 0
+    };
+    var climbBtn = {
+      cx: WIDTH - 55,
+      cy: HEIGHT - 40,
+      r: 42,
+      pressed: false
+    };
+    var keys = {};
+    var touches = new Map();
+    var bgm = document.getElementById('bgm');
+
+    function startMusic() {
+      if (bgm.paused) {
+        bgm.play().catch(e => console.log("Audio waiting for interaction"));
+      }
+    }
+
+    function initControls() {
+      joystick.knobX = joystick.centerX;
+      joystick.knobY = joystick.centerY;
+      climbBtn.pressed = false;
+    }
+
+    function generateMaze() {
+      let attempts = 0;
+      while (attempts < 100) {
+        maze = Array.from({length: ROWS}, () => Array(COLS).fill(1));
+        let stack = [];
+        let visited = Array.from({length: ROWS}, () => Array(COLS).fill(false));
+        let curRow = startRow;
+        let curCol = startCol;
+        maze[curRow][curCol] = 0;
+        visited[curRow][curCol] = true;
+        stack.push({r: curRow, c: curCol});
+        const dirs = [[-1, 0], [0, -1], [0, 1], [1, 0]];
+
+        while (stack.length > 0) {
+          let cur = stack[stack.length - 1];
+          let neighbors = [];
+          for (let d of dirs) {
+            let nr = cur.r + d[0] * 2;
+            let nc = cur.c + d[1] * 2;
+            if (nr >= 1 && nr < ROWS - 1 && nc >= 1 && nc < COLS - 1 && !visited[nr][nc]) {
+              neighbors.push({nr, nc, dr: d[0], dc: d[1]});
+            }
+          }
+          if (neighbors.length > 0) {
+            let randIdx = Math.floor(Math.random() * neighbors.length);
+            let next = neighbors[randIdx];
+            maze[cur.r + next.dr][cur.c + next.dc] = 0;
+            maze[next.nr][next.nc] = 0;
+            visited[next.nr][next.nc] = true;
+            stack.push({r: next.nr, c: next.nc});
+          } else {
+            stack.pop();
+          }
+        }
+
+        for (let i = 1; i <= 6; i++) {
+          if (startRow - i >= 0) maze[startRow - i][startCol] = 0;
+        }
+        maze[0][exitCol] = 0;
+
+        if (hasPathToExit()) return;
+        attempts++;
+      }
+    }
+
+    function hasPathToExit() {
+      let vis = Array.from({length: ROWS}, () => Array(COLS).fill(false));
+      let q = [{r: startRow, c: startCol}];
+      vis[startRow][startCol] = true;
+      while (q.length > 0) {
+        let cur = q.shift();
+        if (cur.r <= 1 && cur.c === exitCol) return true;
+        for (let dr = -1; dr <= 1; dr++) {
+          for (let dc = -1; dc <= 1; dc++) {
+            if (Math.abs(dr) + Math.abs(dc) === 1) {
+              let nr = cur.r + dr;
+              let nc = cur.c + dc;
+              if (nr >= 0 && nr < ROWS && nc >= 0 && nc < COLS && maze[nr][nc] === 0 && !vis[nr][nc]) {
+                vis[nr][nc] = true;
+                q.push({r: nr, c: nc});
+              }
+            }
+          }
+        }
+      }
+      return false;
+    }
+
+    function clear() {
+      ctx.clearRect(0, 0, WIDTH, HEIGHT);
+      ctx.fillStyle = '#080808';
+      for (let r = 0; r < ROWS; r++) {
+        for (let c = 0; c < COLS; c++) {
+          if (maze[r][c] === 1) ctx.fillRect(c * CELL, r * CELL, CELL, CELL);
+        }
+      }
+      ctx.fillRect(0, ROWS * CELL, WIDTH, HEIGHT - ROWS * CELL);
+
+      // Exit glow
+      ctx.save();
+      ctx.translate(exitX, 0);
+      ctx.shadowColor = '#ffff88';
+      ctx.shadowBlur = 40;
+      ctx.fillStyle = 'rgba(255, 255, 200, 0.4)';
+      ctx.fillRect(-35, -15, 70, 60);
+      ctx.shadowBlur = 20;
+      ctx.fillStyle = '#ffff88';
+      ctx.fillRect(-30, 0, 60, 45);
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = '#ffdd66';
+      ctx.fillRect(-25, 8, 50, 30);
+      ctx.restore();
+    }
+
+    function checkCollision(x, y) {
+      let left = Math.floor((x - explorer.radius) / CELL);
+      let right = Math.floor((x + explorer.radius) / CELL);
+      let top = Math.floor((y - explorer.radius) / CELL);
+      let bottom = Math.floor((y + explorer.radius) / CELL);
+      for (let r = Math.max(0, top); r <= Math.min(ROWS - 1, bottom); r++) {
+        for (let c = Math.max(0, left); c <= Math.min(COLS - 1, right); c++) {
+          if (maze[r][c] === 1) return true;
+        }
+      }
+      return (bottom >= ROWS || left < 0 || right >= COLS);
+    }
+
+    function drawExplorer() {
+      if (gameWon && winTimer <= 0) return; // Hide after animation
+
+      ctx.save();
+      ctx.translate(explorer.x, explorer.y);
+      let isClimbing = explorer.vy < -0.5 || climbBtn.pressed;
+
+      // Helmet
+      ctx.fillStyle = '#FFD700';
+      ctx.beginPath();
+      ctx.arc(0, -10, 7, 0, Math.PI * 2);
+      ctx.fill();
+      // Visor
+      ctx.fillStyle = '#87CEEB';
+      ctx.beginPath();
+      ctx.arc(0, -10, 4, 0, Math.PI);
+      ctx.fill();
+      // Suit body
+      ctx.fillStyle = '#FFFFFF';
+      ctx.fillRect(-5, -3, 10, 14);
+      ctx.fillStyle = '#FF4500';
+      ctx.fillRect(-3, 11, 6, 5);
+
+      if (isClimbing || winAnimation) {
+        climbPhase += 0.15;
+        let leftArmY = Math.sin(climbPhase) * 6;
+        let rightArmY = Math.sin(climbPhase + Math.PI) * 6;
+        ctx.fillStyle = '#FFFFFF';
+        ctx.fillRect(-9, -2 + leftArmY, 4, 4);
+        ctx.fillRect(5, -2 + rightArmY, 4, 4);
+        ctx.fillStyle = '#FFD700';
+        ctx.fillRect(-9, -4 + leftArmY, 4, 2);
+        ctx.fillRect(5, -4 + rightArmY, 4, 2);
+      } else {
+        ctx.fillStyle = '#FFFFFF';
+        ctx.fillRect(-9, 2, 4, 4);
+        ctx.fillRect(5, 2, 4, 4);
+      }
+
+      ctx.fillStyle = '#ffff88';
+      ctx.beginPath();
+      ctx.arc(4, -12, 2.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    function createParticles(x, y, count = 12) {
+      for (let i = 0; i < count; i++) {
+        let angle = Math.random() * Math.PI * 2;
+        let speed = 1 + Math.random() * 2;
+        particles.push({
+          x, y,
+          vx: Math.cos(angle) * speed,
+          vy: Math.sin(angle) * speed - 2,
+          life: 60 + Math.random() * 40,
+          maxLife: 100
+        });
+      }
+    }
+
+    function updateParticles() {
+      for (let i = particles.length - 1; i >= 0; i--) {
+        let p = particles[i];
+        p.x += p.vx;
+        p.y += p.vy;
+        p.vy += 0.08;
+        p.life--;
+        if (p.life <= 0) particles.splice(i, 1);
+      }
+    }
+
+    function drawParticles() {
+      for (let p of particles) {
+        let alpha = p.life / p.maxLife;
+        ctx.globalAlpha = alpha * 0.8;
+        ctx.fillStyle = `rgba(255, 220, 100, ${alpha})`;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, 2 + alpha * 3, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.globalAlpha = 1;
+    }
+
+    function checkWin() {
+      if (winAnimation || gameWon) return;
+      // Fixed: Detection is now triggered when the head enters the glow area
+      if (explorer.y < 50 && Math.abs(explorer.x - exitX) < 35) {
+        winAnimation = true;
+        winTimer = 80;
+        createParticles(explorer.x, explorer.y - 10, 25);
+      }
+    }
+
+    function handleWinAnimation() {
+      if (winAnimation) {
+        explorer.y -= 5.0; // Fly out
+        explorer.vx *= 0.5;
+        winTimer--;
+        if (winTimer % 4 === 0) createParticles(explorer.x, explorer.y, 3);
+        if (winTimer <= 0) {
+          winAnimation = false;
+          gameWon = true;
+        }
+      }
+    }
+
+    function checkTimer() {
+      if (winAnimation || gameWon) return;
+      let elapsed = Date.now() - startTime;
+      if (elapsed > 30000) {
+        alert('You ran out of oxygen! Game Over');
+        resetExplorer();
+        generateMaze();
+      }
+    }
+
+    function resetExplorer() {
+      explorer.x = startX;
+      explorer.y = startY;
+      explorer.vx = 0;
+      explorer.vy = 0;
+      tiltX = 0;
+      startTime = Date.now();
+      particles = [];
+      winAnimation = false;
+      gameWon = false;
+      initControls();
+    }
+
+    function update() {
+      if (winAnimation || gameWon) return;
+      checkTimer();
+
+      tiltX = 0;
+      if (joystick.active) {
+        let dx = joystick.knobX - joystick.centerX;
+        tiltX = (dx / joystick.maxDist) * 2;
+      }
+      if (keys['arrowleft'] || keys['a']) tiltX -= 2;
+      if (keys['arrowright'] || keys['d']) tiltX += 2;
+      tiltX = Math.max(-2, Math.min(2, tiltX));
+
+      let climbing = climbBtn.pressed || (keys[' '] || keys['arrowup'] || keys['w']);
+
+      if (climbing) {
+        explorer.vy = -climbSpeed;
+        startMusic();
+      }
+
+      if (!climbing) {
+        explorer.vy += gravity;
+      }
+
+      explorer.vx += tiltX * 0.18;
+      explorer.vx *= friction;
+      explorer.vy *= friction * 0.98;
+
+      let testX = explorer.x + explorer.vx;
+      if (!checkCollision(testX, explorer.y)) explorer.x = testX;
+      else explorer.vx *= -bounce * 0.4;
+
+      let testY = explorer.y + explorer.vy;
+      if (!checkCollision(explorer.x, testY)) explorer.y = testY;
+      else {
+        if (explorer.vy > 0) explorer.vy = 0;
+        else explorer.vy *= -bounce;
+      }
+
+      if (explorer.x - explorer.radius < 0) { explorer.x = explorer.radius; explorer.vx *= -bounce; }
+      if (explorer.x + explorer.radius > WIDTH) { explorer.x = WIDTH - explorer.radius; explorer.vx *= -bounce; }
+      if (explorer.y + explorer.radius > HEIGHT) { explorer.y = HEIGHT - explorer.radius; explorer.vy = 0; }
+    }
+
+    function draw() {
+      clear();
+      update();
+      handleWinAnimation();
+      drawExplorer();
+      drawParticles();
+      checkWin();
+
+      // UI: Oxygen
+      if (!gameWon) {
+        let remaining = Math.max(0, 30 - Math.floor((Date.now() - startTime) / 1000));
+        ctx.fillStyle = 'white';
+        ctx.font = 'bold 18px Arial';
+        ctx.textAlign = 'right';
+        ctx.fillText(`Oxygen: ${remaining}s`, WIDTH - 20, 30);
+      } else {
+        // UI: WIN MESSAGE
+        ctx.fillStyle = 'rgba(0, 255, 120, 0.9)';
+        ctx.font = 'bold 28px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText("YOU'VE ESCAPED IN TIME!", WIDTH / 2, HEIGHT / 2 - 20);
+        ctx.font = '16px Arial';
+        ctx.fillStyle = 'white';
+        ctx.fillText("Click 'New Tube' for another mission", WIDTH / 2, HEIGHT / 2 + 15);
+      }
+
+      // Joystick & Button
+      ctx.fillStyle = 'rgba(50,50,50,0.7)';
+      ctx.beginPath();
+      ctx.arc(joystick.centerX, joystick.centerY, joystick.baseR, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(200,200,200,0.9)';
+      ctx.lineWidth = 3;
+      ctx.stroke();
+      ctx.fillStyle = joystick.active ? '#44ff44' : '#666';
+      ctx.beginPath();
+      ctx.arc(joystick.knobX, joystick.knobY, joystick.knobR, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.save();
+      ctx.translate(climbBtn.cx, climbBtn.cy);
+      let climbColor = climbBtn.pressed ? '#00ff88' : 'rgba(100,150,255,0.8)';
+      ctx.fillStyle = climbColor;
+      ctx.beginPath();
+      ctx.arc(0, 0, climbBtn.r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = 'white';
+      ctx.lineWidth = 3;
+      ctx.stroke();
+      ctx.fillStyle = 'white';
+      ctx.font = 'bold 16px Arial';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('CLIMB', 0, 0);
+      ctx.restore();
+
+      requestAnimationFrame(draw);
+    }
+
+    function getTouchPos(touch) {
+      let rect = canvas.getBoundingClientRect();
+      let scaleX = WIDTH / rect.width;
+      let scaleY = HEIGHT / rect.height;
+      return {
+        tx: (touch.clientX - rect.left) * scaleX,
+        ty: (touch.clientY - rect.top) * scaleY
+      };
+    }
+
+    function handleTouchStart(e) {
+      e.preventDefault();
+      startMusic(); 
+      for (let touch of e.changedTouches) {
+        let id = touch.identifier;
+        let pos = getTouchPos(touch);
+        let joyDist = Math.hypot(pos.tx - joystick.centerX, pos.ty - joystick.centerY);
+        let climbDist = Math.hypot(pos.tx - climbBtn.cx, pos.ty - climbBtn.cy);
+
+        if (joyDist <= joystick.baseR) {
+          touches.set(id, 'joy');
+          let dx = pos.tx - joystick.centerX;
+          let dy = pos.ty - joystick.centerY;
+          let dist = Math.hypot(dx, dy);
+          if (dist > joystick.maxDist) {
+            let ang = Math.atan2(dy, dx);
+            joystick.knobX = joystick.centerX + Math.cos(ang) * joystick.maxDist;
+            joystick.knobY = joystick.centerY + Math.sin(ang) * joystick.maxDist;
+          } else {
+            joystick.knobX = pos.tx;
+            joystick.knobY = pos.ty;
+          }
+          joystick.active = true;
+        } else if (climbDist <= climbBtn.r) {
+          touches.set(id, 'climb');
+          climbBtn.pressed = true;
+        }
+      }
+    }
+
+    function handleTouchMove(e) {
+      e.preventDefault();
+      for (let touch of e.changedTouches) {
+        let id = touch.identifier;
+        if (touches.has(id) && touches.get(id) === 'joy') {
+          let pos = getTouchPos(touch);
+          let dx = pos.tx - joystick.centerX;
+          let dy = pos.ty - joystick.centerY;
+          let dist = Math.hypot(dx, dy);
+          if (dist > joystick.maxDist) {
+            let ang = Math.atan2(dy, dx);
+            joystick.knobX = joystick.centerX + Math.cos(ang) * joystick.maxDist;
+            joystick.knobY = joystick.centerY + Math.sin(ang) * joystick.maxDist;
+          } else {
+            joystick.knobX = pos.tx;
+            joystick.knobY = pos.ty;
+          }
+        }
+      }
+    }
+
+    function handleTouchEnd(e) {
+      e.preventDefault();
+      for (let touch of e.changedTouches) {
+        let id = touch.identifier;
+        if (touches.has(id)) {
+          if (touches.get(id) === 'climb') climbBtn.pressed = false;
+          touches.delete(id);
+        }
+      }
+      if (touches.size === 0) {
+        joystick.active = false;
+        joystick.knobX = joystick.centerX;
+        joystick.knobY = joystick.centerY;
+      }
+    }
+
+    canvas.addEventListener('touchstart', handleTouchStart, { passive: false });
+    canvas.addEventListener('touchmove', handleTouchMove, { passive: false });
+    canvas.addEventListener('touchend', handleTouchEnd, { passive: false });
+    canvas.addEventListener('touchcancel', handleTouchEnd, { passive: false });
+
+    document.addEventListener('keydown', e => {
+      startMusic();
+      keys[e.key.toLowerCase()] = true;
+      if (e.key === ' ') e.preventDefault();
+    });
+    document.addEventListener('keyup', e => {
+      keys[e.key.toLowerCase()] = false;
+    });
+
+    document.getElementById('reset').addEventListener('click', () => {
+      startMusic();
+      resetExplorer();
+      generateMaze();
+    });
+
+    initControls();
+    generateMaze();
+    draw();
+  </script>
+</body>
+</html>
