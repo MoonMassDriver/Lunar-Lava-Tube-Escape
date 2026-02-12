@@ -90,7 +90,7 @@
     var startTime = Date.now();
     var climbPhase = 0; 
     var winAnimation = false;
-    var gameWon = false; // New state to stop logic after win
+    var gameWon = false; 
     var winTimer = 0;
     var particles = [];
 
@@ -204,7 +204,6 @@
       }
       ctx.fillRect(0, ROWS * CELL, WIDTH, HEIGHT - ROWS * CELL);
 
-      // Exit glow
       ctx.save();
       ctx.translate(exitX, 0);
       ctx.shadowColor = '#ffff88';
@@ -234,23 +233,20 @@
     }
 
     function drawExplorer() {
-      if (gameWon && winTimer <= 0) return; // Hide after animation
+      if (gameWon && winTimer <= 0) return;
 
       ctx.save();
       ctx.translate(explorer.x, explorer.y);
       let isClimbing = explorer.vy < -0.5 || climbBtn.pressed;
 
-      // Helmet
       ctx.fillStyle = '#FFD700';
       ctx.beginPath();
       ctx.arc(0, -10, 7, 0, Math.PI * 2);
       ctx.fill();
-      // Visor
       ctx.fillStyle = '#87CEEB';
       ctx.beginPath();
       ctx.arc(0, -10, 4, 0, Math.PI);
       ctx.fill();
-      // Suit body
       ctx.fillStyle = '#FFFFFF';
       ctx.fillRect(-5, -3, 10, 14);
       ctx.fillStyle = '#FF4500';
@@ -318,7 +314,6 @@
 
     function checkWin() {
       if (winAnimation || gameWon) return;
-      // Fixed: Detection is now triggered when the head enters the glow area
       if (explorer.y < 50 && Math.abs(explorer.x - exitX) < 35) {
         winAnimation = true;
         winTimer = 80;
@@ -328,7 +323,7 @@
 
     function handleWinAnimation() {
       if (winAnimation) {
-        explorer.y -= 5.0; // Fly out
+        explorer.y -= 5.0; 
         explorer.vx *= 0.5;
         winTimer--;
         if (winTimer % 4 === 0) createParticles(explorer.x, explorer.y, 3);
@@ -342,7 +337,7 @@
     function checkTimer() {
       if (winAnimation || gameWon) return;
       let elapsed = Date.now() - startTime;
-      if (elapsed > 20000) {
+      if (elapsed > 20000) { // TIMER UPDATED TO 20 SECONDS
         alert('You ran out of oxygen! Game Over');
         resetExplorer();
         generateMaze();
@@ -414,15 +409,13 @@
       drawParticles();
       checkWin();
 
-      // UI: Oxygen
       if (!gameWon) {
-        let remaining = Math.max(0, 30 - Math.floor((Date.now() - startTime) / 1000));
-        ctx.fillStyle = 'white';
+        let remaining = Math.max(0, 20 - Math.floor((Date.now() - startTime) / 1000));
+        ctx.fillStyle = remaining <= 5 ? 'red' : 'white';
         ctx.font = 'bold 18px Arial';
         ctx.textAlign = 'right';
         ctx.fillText(`Oxygen: ${remaining}s`, WIDTH - 20, 30);
       } else {
-        // UI: WIN MESSAGE
         ctx.fillStyle = 'rgba(0, 255, 120, 0.9)';
         ctx.font = 'bold 28px Arial';
         ctx.textAlign = 'center';
@@ -432,7 +425,6 @@
         ctx.fillText("Click 'New Tube' for another mission", WIDTH / 2, HEIGHT / 2 + 15);
       }
 
-      // Joystick & Button
       ctx.fillStyle = 'rgba(50,50,50,0.7)';
       ctx.beginPath();
       ctx.arc(joystick.centerX, joystick.centerY, joystick.baseR, 0, Math.PI * 2);
