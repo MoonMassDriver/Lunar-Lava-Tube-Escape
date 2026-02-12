@@ -342,7 +342,7 @@
     function checkTimer() {
       if (winAnimation || gameWon) return;
       let elapsed = Date.now() - startTime;
-      if (elapsed > 30000) {
+      if (elapsed > 20000) {
         alert('You ran out of oxygen! Game Over');
         resetExplorer();
         generateMaze();
